@@ -30,6 +30,12 @@ import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.ProgressBar;
 
+import com.google.firebase.database.ChildEventListener;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,12 +55,27 @@ public class MainActivity extends AppCompatActivity {
 
     private String mUsername;
 
+    //JB: FirebaseDatabase
+    private FirebaseDatabase mFirebaseDatabase;
+
+    //JB: a DatabaseReference for Messages
+    private DatabaseReference mMessagesDatabaseReference;
+
+    //JB: Messages ChildEventListener
+    private ChildEventListener mChildEventListener;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
         mUsername = ANONYMOUS;
+
+        //JB: Initialize Datase
+        mFirebaseDatabase = FirebaseDatabase.getInstance();
+
+        //JB: Acquire a DatabaseReference for Messages
+        mMessagesDatabaseReference = mFirebaseDatabase.getReference().child("friendlychat").child("messages");
 
         // Initialize references to views
         mProgressBar = (ProgressBar) findViewById(R.id.progressBar);
@@ -104,12 +125,44 @@ public class MainActivity extends AppCompatActivity {
         mSendButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                // TODO: Send messages on click
+                // DONE: Send messages on click
+                FriendlyMessage friendlyMessage
+                        = new FriendlyMessage(mMessageEditText.getText().toString(),
+                        mUsername,
+                        null);
+                mMessagesDatabaseReference.push().setValue(friendlyMessage);
 
                 // Clear input box
                 mMessageEditText.setText("");
             }
         });
+
+        // JB: Sync messages into view
+        mChildEventListener = new ChildEventListener() {
+            @Override
+            public void onChildAdded(DataSnapshot dataSnapshot, String s) {
+                FriendlyMessage friendlyMessage = dataSnapshot.getValue(FriendlyMessage.class);
+                mMessageAdapter.add(friendlyMessage);
+            }
+
+            @Override
+            public void onChildChanged(DataSnapshot dataSnapshot, String s) {
+            }
+
+            @Override
+            public void onChildRemoved(DataSnapshot dataSnapshot) {
+            }
+
+            @Override
+            public void onChildMoved(DataSnapshot dataSnapshot, String s) {
+            }
+
+            @Override
+            public void onCancelled(DatabaseError databaseError) {
+            }
+        };
+
+        mMessagesDatabaseReference.addChildEventListener(mChildEventListener);
     }
 
     @Override
@@ -122,5 +175,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // JB: remove ChildEventListener
+        mMessagesDatabaseReference.removeEventListener(mChildEventListener);
     }
 }
