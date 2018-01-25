@@ -16,6 +16,7 @@
 package com.google.firebase.udacity.friendlychat;
 
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.text.Editable;
 import android.text.InputFilter;
@@ -29,7 +30,11 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 
+import com.firebase.ui.auth.AuthUI;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.ChildEventListener;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -37,6 +42,7 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
@@ -45,6 +51,9 @@ public class MainActivity extends AppCompatActivity {
 
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
+
+    // JB: An arbitrary request code value for FirebaseUI Intent
+    private static final int RC_SIGN_IN = 123;
 
     private ListView mMessageListView;
     private MessageAdapter mMessageAdapter;
@@ -62,7 +71,14 @@ public class MainActivity extends AppCompatActivity {
     private DatabaseReference mMessagesDatabaseReference;
 
     //JB: Messages ChildEventListener
-    private ChildEventListener mChildEventListener;
+    private ChildEventListener mMessagesEventListener;
+
+    //JB: FirebaseAuth
+    private FirebaseAuth mFirebaseAuth;
+
+    //JB: FirebaseAuth AuthStateListener
+    private FirebaseAuth.AuthStateListener mFirebaseAuthStateListener;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,8 +87,9 @@ public class MainActivity extends AppCompatActivity {
 
         mUsername = ANONYMOUS;
 
-        //JB: Initialize Datase
+        //JB: Initialize Firebase Components
         mFirebaseDatabase = FirebaseDatabase.getInstance();
+        mFirebaseAuth = FirebaseAuth.getInstance();
 
         //JB: Acquire a DatabaseReference for Messages
         mMessagesDatabaseReference = mFirebaseDatabase.getReference().child("friendlychat").child("messages");
@@ -138,7 +155,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // JB: Sync messages into view
-        mChildEventListener = new ChildEventListener() {
+        mMessagesEventListener = new ChildEventListener() {
             @Override
             public void onChildAdded(DataSnapshot dataSnapshot, String s) {
                 FriendlyMessage friendlyMessage = dataSnapshot.getValue(FriendlyMessage.class);
@@ -161,8 +178,31 @@ public class MainActivity extends AppCompatActivity {
             public void onCancelled(DatabaseError databaseError) {
             }
         };
+        registerMessagesEventListener(true);
 
-        mMessagesDatabaseReference.addChildEventListener(mChildEventListener);
+        // JB: Initialize mFirebaseAuthStateListener
+        mFirebaseAuthStateListener = new FirebaseAuth.AuthStateListener() {
+            @Override
+            public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
+                FirebaseUser user = firebaseAuth.getCurrentUser();
+
+                if (user != null) {
+                    // user is signed in
+                    Toast.makeText(MainActivity.this, "You are now signed in!", Toast.LENGTH_SHORT).show();
+                } else {
+                    // user is singed out
+                    startActivityForResult(AuthUI.getInstance()
+                                    .createSignInIntentBuilder()
+                                    .setIsSmartLockEnabled(false)
+                                    .setAvailableProviders(
+                                            Arrays.asList(
+                                                    new AuthUI.IdpConfig.EmailBuilder().build(),
+                                                    new AuthUI.IdpConfig.GoogleBuilder().build()))
+                                    .build()
+                            , RC_SIGN_IN);
+                }
+            }
+        };
     }
 
     @Override
@@ -178,9 +218,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        registerAuthStateListener(true);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        registerAuthStateListener(false);
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         // JB: remove ChildEventListener
-        mMessagesDatabaseReference.removeEventListener(mChildEventListener);
+        registerMessagesEventListener(false);
+    }
+
+    // JB: Registers AuthStateListener
+    private void registerMessagesEventListener(boolean register) {
+        if (register) {
+            mMessagesDatabaseReference.addChildEventListener(mMessagesEventListener);
+        } else {
+            mMessagesDatabaseReference.removeEventListener(mMessagesEventListener);
+        }
+    }
+
+    // JB: Registers AuthStateListener
+    private void registerAuthStateListener(boolean register) {
+        if (register) {
+            mFirebaseAuth.addAuthStateListener(mFirebaseAuthStateListener);
+        } else {
+            mFirebaseAuth.removeAuthStateListener(mFirebaseAuthStateListener);
+        }
     }
 }
