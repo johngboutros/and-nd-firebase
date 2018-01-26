@@ -15,6 +15,7 @@
  */
 package com.google.firebase.udacity.friendlychat;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
@@ -153,56 +154,6 @@ public class MainActivity extends AppCompatActivity {
                 mMessageEditText.setText("");
             }
         });
-
-        // JB: Sync messages into view
-        mMessagesEventListener = new ChildEventListener() {
-            @Override
-            public void onChildAdded(DataSnapshot dataSnapshot, String s) {
-                FriendlyMessage friendlyMessage = dataSnapshot.getValue(FriendlyMessage.class);
-                mMessageAdapter.add(friendlyMessage);
-            }
-
-            @Override
-            public void onChildChanged(DataSnapshot dataSnapshot, String s) {
-            }
-
-            @Override
-            public void onChildRemoved(DataSnapshot dataSnapshot) {
-            }
-
-            @Override
-            public void onChildMoved(DataSnapshot dataSnapshot, String s) {
-            }
-
-            @Override
-            public void onCancelled(DatabaseError databaseError) {
-            }
-        };
-        registerMessagesEventListener(true);
-
-        // JB: Initialize mFirebaseAuthStateListener
-        mFirebaseAuthStateListener = new FirebaseAuth.AuthStateListener() {
-            @Override
-            public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
-                FirebaseUser user = firebaseAuth.getCurrentUser();
-
-                if (user != null) {
-                    // user is signed in
-                    Toast.makeText(MainActivity.this, "You are now signed in!", Toast.LENGTH_SHORT).show();
-                } else {
-                    // user is singed out
-                    startActivityForResult(AuthUI.getInstance()
-                                    .createSignInIntentBuilder()
-                                    .setIsSmartLockEnabled(false)
-                                    .setAvailableProviders(
-                                            Arrays.asList(
-                                                    new AuthUI.IdpConfig.EmailBuilder().build(),
-                                                    new AuthUI.IdpConfig.GoogleBuilder().build()))
-                                    .build()
-                            , RC_SIGN_IN);
-                }
-            }
-        };
     }
 
     @Override
@@ -214,43 +165,145 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        return super.onOptionsItemSelected(item);
+        switch (item.getItemId()) {
+            //JB: Handle signing out
+            case R.id.sign_out_menu:
+                AuthUI.getInstance().signOut(this);
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        // JB: Register FirebaseAuth Listener, which will result in registering MessagesReadListener
         registerAuthStateListener(true);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        // JB: Unegister FirebaseAuth Listener, as well as MessagesReadListener
         registerAuthStateListener(false);
+        registerMessagesReadListener(false);
+
+        // JB: Clear the view so that no duplicates show up on resume
+        mMessageAdapter.clear();
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        // JB: remove ChildEventListener
-        registerMessagesEventListener(false);
-    }
+//    @Override
+//    protected void onDestroy() {
+//        super.onDestroy();
+//        // JB: remove ChildEventListener (already removed on pause)
+//        registerMessagesReadListener(false);
+//    }
 
     // JB: Registers AuthStateListener
-    private void registerMessagesEventListener(boolean register) {
+    private void registerMessagesReadListener(boolean register) {
         if (register) {
+
+            if (mMessagesEventListener == null) {
+                // JB: Sync messages into view
+                mMessagesEventListener = new ChildEventListener() {
+                    @Override
+                    public void onChildAdded(DataSnapshot dataSnapshot, String s) {
+                        FriendlyMessage friendlyMessage = dataSnapshot.getValue(FriendlyMessage.class);
+                        mMessageAdapter.add(friendlyMessage);
+                    }
+
+                    @Override
+                    public void onChildChanged(DataSnapshot dataSnapshot, String s) {
+                    }
+
+                    @Override
+                    public void onChildRemoved(DataSnapshot dataSnapshot) {
+                    }
+
+                    @Override
+                    public void onChildMoved(DataSnapshot dataSnapshot, String s) {
+                    }
+
+                    @Override
+                    public void onCancelled(DatabaseError databaseError) {
+                    }
+                };
+            }
             mMessagesDatabaseReference.addChildEventListener(mMessagesEventListener);
         } else {
-            mMessagesDatabaseReference.removeEventListener(mMessagesEventListener);
+            if (mMessagesEventListener != null) {
+                mMessagesDatabaseReference.removeEventListener(mMessagesEventListener);
+                mMessagesEventListener = null;
+            }
         }
     }
 
     // JB: Registers AuthStateListener
     private void registerAuthStateListener(boolean register) {
         if (register) {
+
+            if (mFirebaseAuthStateListener == null) {
+                // JB: Initialize mFirebaseAuthStateListener
+                mFirebaseAuthStateListener = new FirebaseAuth.AuthStateListener() {
+                    @Override
+                    public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
+                        FirebaseUser user = firebaseAuth.getCurrentUser();
+
+                        if (user != null) {
+                            // user is signed in
+                            onSignedInInitialize(user);
+                            // Toast.makeText(MainActivity.this, "You are now signed in!", Toast.LENGTH_SHORT).show();
+                        } else {
+                            // user is singed out
+                            onSignedOutCleanup();
+                            startActivityForResult(AuthUI.getInstance()
+                                            .createSignInIntentBuilder()
+                                            .setIsSmartLockEnabled(false)
+                                            .setAvailableProviders(
+                                                    Arrays.asList(
+                                                            new AuthUI.IdpConfig.EmailBuilder().build(),
+                                                            new AuthUI.IdpConfig.GoogleBuilder().build()))
+                                            .build()
+                                    , RC_SIGN_IN);
+                        }
+                    }
+                };
+            }
+
             mFirebaseAuth.addAuthStateListener(mFirebaseAuthStateListener);
         } else {
-            mFirebaseAuth.removeAuthStateListener(mFirebaseAuthStateListener);
+            if (mFirebaseAuthStateListener != null) {
+                mFirebaseAuth.removeAuthStateListener(mFirebaseAuthStateListener);
+            }
         }
+    }
+
+    // JB: Override onActivityResult() to find out if back button
+    // pressed from Login flow to finish the Activity
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == RC_SIGN_IN) {
+            if (resultCode == RESULT_OK) {
+                Toast.makeText(this, "Signed in!", Toast.LENGTH_SHORT).show();
+            } else if (resultCode == RESULT_CANCELED) {
+                Toast.makeText(this, "Signed in cancelled!", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        }
+    }
+
+    // JB: onSinedInInitialize(
+    private void onSignedInInitialize(FirebaseUser user) {
+        mUsername = user.getDisplayName();
+        registerMessagesReadListener(true);
+    }
+
+    // JB: onSinedInInitialize(
+    private void onSignedOutCleanup() {
+        mUsername = ANONYMOUS;
+        mMessageAdapter.clear();
+        registerMessagesReadListener(false);
     }
 }
