@@ -23,6 +23,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -35,6 +36,7 @@ import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import com.firebase.ui.auth.AuthUI;
+import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
@@ -43,13 +45,17 @@ import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -57,6 +63,9 @@ public class MainActivity extends AppCompatActivity {
 
     public static final String ANONYMOUS = "anonymous";
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
+
+    // JB RemoteConfig FRIENDLY_MSG_LENGTH_KEY
+    private static final String FRIENDLY_MSG_LENGTH_KEY = "friendly_msg_length";
 
     // JB: An arbitrary request code value for FirebaseUI Intent
     private static final int RC_SIGN_IN = 123;
@@ -73,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String mUsername;
 
+
     //JB: FirebaseDatabase
     private FirebaseDatabase mFirebaseDatabase;
     //JB: a DatabaseReference for Messages
@@ -80,14 +90,22 @@ public class MainActivity extends AppCompatActivity {
     //JB: Messages ChildEventListener
     private ChildEventListener mMessagesEventListener;
 
+
     //JB: FirebaseAuth
     private FirebaseAuth mFirebaseAuth;
     //JB: FirebaseAuth AuthStateListener
     private FirebaseAuth.AuthStateListener mFirebaseAuthStateListener;
 
+
     //JB: Firebase Storage
     private FirebaseStorage mFirebaseStorage;
+    //JB: Firebase StorageReference for Chat Photos
     private StorageReference mChatPhotosStorageReference;
+
+
+    //JB: Firebase RemoteConfig
+    private FirebaseRemoteConfig mFirebaseRemoteConfig;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -100,6 +118,7 @@ public class MainActivity extends AppCompatActivity {
         mFirebaseDatabase = FirebaseDatabase.getInstance();
         mFirebaseAuth = FirebaseAuth.getInstance();
         mFirebaseStorage = FirebaseStorage.getInstance();
+        mFirebaseRemoteConfig = FirebaseRemoteConfig.getInstance();
 
         //JB: Acquire a DatabaseReference for Messages
         mMessagesDatabaseReference = mFirebaseDatabase.getReference().child("friendlychat").child("messages");
@@ -170,6 +189,19 @@ public class MainActivity extends AppCompatActivity {
                 mMessageEditText.setText("");
             }
         });
+
+        // JB: Configure Firebase RemoteConfig
+        // JB: Enable developer mode to allow for frequent refreshes of the cache
+        FirebaseRemoteConfigSettings configSettings = new FirebaseRemoteConfigSettings.Builder()
+                .setDeveloperModeEnabled(BuildConfig.DEBUG).build();
+        mFirebaseRemoteConfig.setConfigSettings(configSettings);
+        // JB: Set in-app default values from an XML file:
+        // mFirebaseRemoteConfig.setDefaults(R.xml.remote_config_defaults);
+        // JB: Set in-app default values from a Map object:
+        Map<String, Object> defaultConfigMap = new HashMap<String, Object>();
+        defaultConfigMap.put(FRIENDLY_MSG_LENGTH_KEY, DEFAULT_MSG_LENGTH_LIMIT);
+        mFirebaseRemoteConfig.setDefaults(defaultConfigMap);
+        fetchRemoteConfig();
     }
 
     @Override
@@ -354,5 +386,38 @@ public class MainActivity extends AppCompatActivity {
         mUsername = ANONYMOUS;
         mMessageAdapter.clear();
         registerMessagesReadListener(false);
+    }
+
+    // JB: Fetch Firebase RemoteConfig
+    private void fetchRemoteConfig() {
+        long cacheExpiration = 3600;
+        // Allow frequent refreshes of the cache if Dev mode
+        if (mFirebaseRemoteConfig.getInfo().getConfigSettings().isDeveloperModeEnabled()) {
+            cacheExpiration = 0;
+        }
+        mFirebaseRemoteConfig.fetch(cacheExpiration)
+                .addOnSuccessListener(new OnSuccessListener<Void>() {
+                    @Override
+                    public void onSuccess(Void aVoid) {
+                        mFirebaseRemoteConfig.activateFetched();
+                        applyRetrievedMessageLengthLimit();
+                    }
+                })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Log.w(TAG, "RemoteConfig fetch error", e);
+                        applyRetrievedMessageLengthLimit();
+                    }
+                });
+    }
+
+    // JB: Apply message length limit retrieved from Firebase RemoteConfig
+    private void applyRetrievedMessageLengthLimit() {
+        Long messageLengthLimit = mFirebaseRemoteConfig.getLong(FRIENDLY_MSG_LENGTH_KEY);
+        mMessageEditText.setFilters(new InputFilter[]{
+                new InputFilter.LengthFilter(messageLengthLimit.intValue())});
+        Log.d(TAG, "RemoteConfig applied: "
+                + FRIENDLY_MSG_LENGTH_KEY + " = " + messageLengthLimit);
     }
 }
